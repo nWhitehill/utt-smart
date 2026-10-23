@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "utt-smart"
+version = "0.1.0"
+description = "Neural-network and Monte Carlo search experiments for Ultimate Tic Tac Toe"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+training = [
+    "numpy>=2.5.4",
+    "torch>=2.14.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
