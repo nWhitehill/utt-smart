@@ -69,7 +69,7 @@ class NeuralMC:
         # The root stands for the current position, reached by the other player's move
         self.root = Node(None, None, other_token(to_move), 1.0)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluate(self, game, to_move):
         # Returns the network's move probabilities and its value for to_move
         self.net.eval()
