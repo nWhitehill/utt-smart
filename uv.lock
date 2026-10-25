@@ -555,16 +555,18 @@ wheels = [
 name = "utt-smart"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "torch" },
+]
 
 [package.optional-dependencies]
 training = [
     { name = "numpy" },
-    { name = "torch" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "numpy", marker = "extra == 'training'", specifier = ">=2.5.4" },
-    { name = "torch", marker = "extra == 'training'", specifier = ">=2.14.1" },
+    { name = "torch", specifier = ">=2.14.1" },
 ]
 provides-extras = ["training"]

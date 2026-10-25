@@ -1,4 +1,5 @@
 import math
+import random
 import torch
 from torch.nn import MSELoss
 from utt_smart.training.utt import UTT, DRAW
@@ -7,6 +8,11 @@ from utt_smart.training.mct import other_token
 # How strongly the network's prior pulls the search towards a move, relative
 # to the value the search has measured for it
 C_PUCT = 1.5
+
+# Self-play mixes Dirichlet noise into the root priors so the search sometimes
+# tries moves the network doesn't yet like, as in AlphaZero
+DIRICHLET_ALPHA = 0.3
+NOISE_FRACTION = 0.25
 
 
 class Node:
@@ -56,8 +62,9 @@ def select_child(node):
 
 
 class NeuralMC:
-    def __init__(self, net, game=None, to_move='X'):
+    def __init__(self, net, game=None, to_move='X', noise=False):
         self.net = net
+        self.noise = noise
         self.game = game.copy() if game is not None else UTT()
         # The root stands for the current position, reached by the other player's move
         self.root = Node(None, None, other_token(to_move), 1.0)
@@ -92,6 +99,8 @@ class NeuralMC:
             node.children = [Node(node, move, to_move, probs[move].item())
                              for move in game.valid_moves()]
             value = -net_value
+            if node is self.root and self.noise:
+                self.add_root_noise()
 
         # Back up the result, flipping sign each level as the players alternate
         while node is not None:
@@ -99,6 +108,18 @@ class NeuralMC:
             node.value_sum += value
             value = -value
             node = node.parent
+
+    def add_root_noise(self):
+        children = self.root.children
+        noise = torch.distributions.Dirichlet(torch.full((len(children),), DIRICHLET_ALPHA)).sample()
+        for child, n in zip(children, noise):
+            child.prior = (1 - NOISE_FRACTION) * child.prior + NOISE_FRACTION * n.item()
+
+    def sample_move(self):
+        # Picks a move with probability proportional to its visit count, so
+        # self-play games differ from each other
+        children = self.root.children
+        return random.choices(children, weights=[child.visits for child in children])[0].move
 
     def best_move(self):
         best = max(self.root.children, key=lambda node: node.visits)

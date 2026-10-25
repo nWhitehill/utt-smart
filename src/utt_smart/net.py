@@ -1,5 +1,10 @@
 import torch
 from torch import nn
+from torch.optim import Adam
+import pathlib
+
+# Always the project root, whatever directory training is run from
+TRAINED_PATH = pathlib.Path(__file__).resolve().parents[2] / "trained.pt"
 
 class ResBlock(nn.Module):
     def __init__(self, ch):
@@ -36,3 +41,12 @@ class Net(nn.Module):
         legal = x[:, 2].flatten(1).bool()
         logits = self.policy(h).masked_fill(~legal, -1e9)
         return logits, self.value(h)
+
+
+BOT = Net()
+OPTIMIZER = Adam(BOT.parameters(), lr=1e-3)
+
+if TRAINED_PATH.exists():
+    checkpoint = torch.load(TRAINED_PATH, weights_only=True)
+    BOT.load_state_dict(checkpoint['model_state_dict'])
+    OPTIMIZER.load_state_dict(checkpoint['optimizer_state_dict'])
