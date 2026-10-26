@@ -1,8 +1,11 @@
 from utt_smart.net import BOT, TRAINED_PATH
 from utt_smart.training.nmct import NeuralMC, encode
 from utt_smart.training.utt import UTT, DRAW
+from utt_smart.training.train_multi import BatchedEvaluator
+from concurrent.futures import ThreadPoolExecutor
 from torch.nn import MSELoss, CrossEntropyLoss
 from torch.optim import Adam
+import threading
 import torch
 import random
 
@@ -19,31 +22,48 @@ class TrainingMove:
 
     def add_target(self, results):
         self.target = results[self.turn_token]
-       
-def generate_batch(bot, n_games_to_play, n_games_simulate):
-    batch_data = []
-    for _ in range(n_games_to_play):
-        game_moves = []
-        game = UTT()
-        turn_to_move = 'X'
-        while not game.is_over():
-            nmc = NeuralMC(bot, game, turn_to_move, noise=True)
-            nmc.start(n_games_simulate)
-            move = nmc.sample_move() if len(game.moves) < SAMPLED_MOVES else nmc.best_move()
-            game_moves.append(TrainingMove(encode(game, turn_to_move), nmc.policy(), turn_to_move))
-            game.apply_move(move, turn_to_move)
-            turn_to_move = 'O' if turn_to_move == 'X' else 'X'
 
-        results = {}
-        if game.winner == DRAW:
-            results = {'X': 0, 'O': 0} 
-        else:
-            results = {'X': 1 if game.winner == 'X' else -1,
-                        'O': 1 if game.winner == 'O' else -1}
-        for move in game_moves:
-            move.add_target(results)
-        batch_data.extend(game_moves)
-    return batch_data 
+def play_game_nmct(nn_call, n_games_simulate):
+    game_moves = []
+    game = UTT()
+    turn_to_move = 'X'
+    while not game.is_over():
+        nmc = NeuralMC(nn_call, game, turn_to_move, noise=True)
+        nmc.start(n_games_simulate)
+        move = nmc.sample_move() if len(game.moves) < SAMPLED_MOVES else nmc.best_move()
+        game_moves.append(TrainingMove(encode(game, turn_to_move), nmc.policy(), turn_to_move))
+        game.apply_move(move, turn_to_move)
+        turn_to_move = 'O' if turn_to_move == 'X' else 'X'
+
+    results = {}
+    if game.winner == DRAW:
+        results = {'X': 0, 'O': 0} 
+    else:
+        results = {'X': 1 if game.winner == 'X' else -1,
+                    'O': 1 if game.winner == 'O' else -1}
+    for move in game_moves:
+        move.add_target(results)
+    return game_moves
+
+
+def generate_batch(bot, n_games_to_play, n_games_simulate):
+    # Every game runs on its own thread so their network calls can be batched together
+    evaluator = BatchedEvaluator(bot, n_games_to_play)
+    eval_thread = threading.Thread(target=evaluator.run)
+    eval_thread.start()
+
+    def play():
+        try:
+            return play_game_nmct(evaluator.evaluate, n_games_simulate)
+        finally:
+            evaluator.game_finished()
+
+    batch_data = []
+    with ThreadPoolExecutor(max_workers=n_games_to_play) as executor:
+        for game in [executor.submit(play) for _ in range(n_games_to_play)]:
+            batch_data.extend(game.result())
+    eval_thread.join()
+    return batch_data
 
 
 def random_symmetry(planes, pi):
@@ -98,4 +118,3 @@ def training(optimizer, generations, games_per_gen, n_games_simulate, batch_samp
             'model_state_dict': bot.state_dict(),
             'optimizer_state_dict': optimizer.state_dict()
         }, TRAINED_PATH)
-

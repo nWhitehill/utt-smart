@@ -36,15 +36,15 @@ class Node:
 
 def encode(game, to_move):
     # The 3 input planes, from the point of view of the player about to move
+    # Built as Python lists and turned into a tensor in one call: every small
+    # torch op releases the GIL, which stalls self-play running on many threads
     opponent = other_token(to_move)
-    planes = torch.zeros(3, 81)
-    for i, cell in enumerate(game.board):
-        if cell == to_move:
-            planes[0, i] = 1
-        elif cell == opponent:
-            planes[1, i] = 1
-    planes[2, game.valid_moves()] = 1
-    return planes.view(3, 9, 9)
+    mine = [1.0 if cell == to_move else 0.0 for cell in game.board]
+    theirs = [1.0 if cell == opponent else 0.0 for cell in game.board]
+    legal = [0.0] * 81
+    for move in game.valid_moves():
+        legal[move] = 1.0
+    return torch.tensor([mine, theirs, legal]).view(3, 9, 9)
 
 
 def terminal_value(winner, token):
@@ -62,19 +62,18 @@ def select_child(node):
 
 
 class NeuralMC:
-    def __init__(self, net, game=None, to_move='X', noise=False):
-        self.net = net
+    def __init__(self, eval_lambda, game=None, to_move='X', noise=False):
+        # Takes an encoded position, returns (move probabilities as an 81-long
+        # list, value for the player to move)
+        self.eval = eval_lambda
         self.noise = noise
         self.game = game.copy() if game is not None else UTT()
         # The root stands for the current position, reached by the other player's move
         self.root = Node(None, None, other_token(to_move), 1.0)
 
-    @torch.inference_mode()
     def evaluate(self, game, to_move):
         # Returns the network's move probabilities and its value for to_move
-        self.net.eval()
-        logits, value = self.net(encode(game, to_move).unsqueeze(0))
-        return torch.softmax(logits[0], dim=0), value.item()
+        return self.eval(encode(game, to_move))
 
     def start(self, iterations):
         for _ in range(iterations):
@@ -96,7 +95,7 @@ class NeuralMC:
             # player to move, who is the opponent of node.token
             to_move = other_token(node.token)
             probs, net_value = self.evaluate(game, to_move)
-            node.children = [Node(node, move, to_move, probs[move].item())
+            node.children = [Node(node, move, to_move, probs[move])
                              for move in game.valid_moves()]
             value = -net_value
             if node is self.root and self.noise:
