@@ -1,5 +1,5 @@
 import threading
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 import torch
 
 
@@ -49,3 +49,22 @@ class BatchedEvaluator:
                     # Pass the error to the waiting games rather than leaving them hung
                     for _, future in batch:
                         future.set_exception(e)
+
+
+def run_on_threads(bot, n_games, play):
+    # Runs play(nn_call, game_index) for every game on its own thread, with
+    # their network calls batched together. Returns each game's result in order
+    evaluator = BatchedEvaluator(bot, n_games)
+    eval_thread = threading.Thread(target=evaluator.run)
+    eval_thread.start()
+
+    def run(game_index):
+        try:
+            return play(evaluator.evaluate, game_index)
+        finally:
+            evaluator.game_finished()
+
+    with ThreadPoolExecutor(max_workers=n_games) as executor:
+        results = [game.result() for game in [executor.submit(run, i) for i in range(n_games)]]
+    eval_thread.join()
+    return results
