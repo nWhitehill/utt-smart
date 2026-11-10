@@ -2,17 +2,23 @@ from utt_smart.net import BOT, TRAINED_PATH
 from utt_smart.training.nmct import NeuralMC, encode
 from utt_smart.training.utt import UTT, DRAW
 from utt_smart.training.mct import MC, other_token
-from utt_smart.training.train_multi import run_on_threads
+from utt_smart.training.train_multi import GamePool
 from torch.nn import MSELoss, CrossEntropyLoss
 from torch.optim import Adam
 import torch
-from collections import deque
+from collections import Counter, deque
+import csv
+from functools import partial
+import math
 import random
 import time
 
 # Self-play samples moves from the visit counts for this many moves, then plays
 # the most visited move for the rest of the game
 SAMPLED_MOVES = 12
+
+# One row per generation, appended across runs, for training_analysis.ipynb
+LOG_PATH = TRAINED_PATH.parent / "runs" / "training_log.csv"
 
 class TrainingMove:
     def __init__(self, encoded_game, move_policy, turn_token):
@@ -24,7 +30,7 @@ class TrainingMove:
     def add_target(self, results):
         self.target = results[self.turn_token]
 
-def play_game_nmct(nn_call, n_games_simulate):
+def play_game_nmct(nn_call, game_index, n_games_simulate):
     game_moves = []
     game = UTT()
     turn_to_move = 'X'
@@ -47,13 +53,24 @@ def play_game_nmct(nn_call, n_games_simulate):
     return game_moves
 
 
-def generate_batch(bot, n_games_to_play, n_games_simulate):
-    games = run_on_threads(bot, n_games_to_play, lambda nn_call, _: play_game_nmct(nn_call, n_games_simulate))
-    return [move for game_moves in games for move in game_moves]
+def generate_batch(pool, bot, n_games_to_play, n_games_simulate):
+    # Returns each game's list of moves
+    return pool.run(bot, n_games_to_play, partial(play_game_nmct, n_games_simulate=n_games_simulate))
 
 
-def play_vs_mct(nn_call, nn_token, n_games_simulate, mct_iterations):
+def game_winner(game_moves):
+    # X makes the first move, so its target is the result from X's point of view
+    return {1: 'X', -1: 'O', 0: DRAW}[game_moves[0].target]
+
+
+def nn_token_for(game_index):
+    # The network alternates between X and O so the first-move advantage evens out
+    return 'X' if game_index % 2 == 0 else 'O'
+
+
+def play_vs_mct(nn_call, game_index, n_games_simulate, mct_iterations):
     # The network plays its best move with no noise, against plain MCT with random playouts
+    nn_token = nn_token_for(game_index)
     game = UTT()
     to_move = 'X'
     while not game.is_over():
@@ -68,16 +85,33 @@ def play_vs_mct(nn_call, nn_token, n_games_simulate, mct_iterations):
     return game.winner
 
 
-def evaluate_vs_mct(bot, n_games, n_games_simulate, mct_iterations):
-    # The network alternates between X and O so the first-move advantage evens out
-    nn_tokens = ['X' if i % 2 == 0 else 'O' for i in range(n_games)]
-    winners = run_on_threads(bot, n_games, lambda nn_call, i: play_vs_mct(nn_call, nn_tokens[i], n_games_simulate, mct_iterations))
+def evaluate_vs_mct(pool, bot, n_games, n_games_simulate, mct_iterations):
+    nn_tokens = [nn_token_for(i) for i in range(n_games)]
+    winners = pool.run(bot, n_games, partial(play_vs_mct, n_games_simulate=n_games_simulate, mct_iterations=mct_iterations))
     record = {'X': [0, 0, 0], 'O': [0, 0, 0]}  # wins, draws, losses for the network playing that side
     for nn_token, winner in zip(nn_tokens, winners):
         record[nn_token][0 if winner == nn_token else 1 if winner == DRAW else 2] += 1
     wins, draws, losses = (record['X'][k] + record['O'][k] for k in range(3))
     print(f"vs MCT({mct_iterations}): {wins} W / {draws} D / {losses} L"
           f"  (as X {'-'.join(map(str, record['X']))}, as O {'-'.join(map(str, record['O']))})")
+    return record
+
+
+def policy_entropy(training_data):
+    # The lowest policy loss possible on this data: cross-entropy can only reach
+    # the entropy of the visit-count targets themselves
+    pi = torch.stack([move.move_policy for move in training_data])
+    return -(pi * torch.log(pi.clamp_min(1e-12))).sum(dim=1).mean().item()
+
+
+def log_generation(row):
+    LOG_PATH.parent.mkdir(exist_ok=True)
+    new_file = not LOG_PATH.exists()
+    with open(LOG_PATH, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(row))
+        if new_file:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def random_symmetry(planes, pi):
@@ -116,30 +150,56 @@ def train(bot: torch.nn.Module, optimizer, training_data):
     optimizer.step()
     return policy_loss.item(), values_loss.item()
 
-def training(optimizer, generations, games_per_gen, n_games_simulate, batch_samples, batch_size,
-             buffer_generations=10, eval_games=10, mct_iterations=200):
+def training(optimizer, generations, games_per_gen, n_games_simulate, batch_size, passes_per_generation,
+             buffer_generations=10, eval_games=10, mct_iterations=200, workers=None):
     bot = BOT
     # Training samples from the last few generations' self-play, not just the
     # newest, so the net doesn't forget positions it played a while ago
     replay_buffer = deque(maxlen=buffer_generations)
+    run = time.strftime("%Y-%m-%d %H:%M:%S")
     print("Starting Training")
-    for i in range(generations):
-        start = time.time()
-        print(f"Generation {i+1}/{generations}")
-        replay_buffer.append(generate_batch(bot, games_per_gen, n_games_simulate))
-        print(f"Self-play: {len(replay_buffer[-1])} positions from {games_per_gen} games in {time.time() - start:.0f}s")
-        training_data = [move for generation in replay_buffer for move in generation]
-        print(f"Training on {len(training_data)} positions from the last {len(replay_buffer)} generations")
-        policy_total = value_total = 0.0
-        for _ in range(batch_samples):
-            batch = random.choices(training_data, k=batch_size)
-            policy_loss, value_loss = train(bot, optimizer, batch)
-            policy_total += policy_loss
-            value_total += value_loss
-        print(f"Avg loss over {batch_samples} batches: policy {policy_total / batch_samples:.4f}, value {value_total / batch_samples:.4f}")
-        evaluate_vs_mct(bot, eval_games, n_games_simulate, mct_iterations)
-        print(f"Generation took {time.time() - start:.0f}s")
-        torch.save({
-            'model_state_dict': bot.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict()
-        }, TRAINED_PATH)
+    with GamePool(workers) as pool:
+        for i in range(generations):
+            start = time.time()
+            print(f"Generation {i+1}/{generations}")
+            games = generate_batch(pool, bot, games_per_gen, n_games_simulate)
+            replay_buffer.append([move for game_moves in games for move in game_moves])
+            selfplay_done = time.time()
+            print(f"Self-play: {len(replay_buffer[-1])} positions from {games_per_gen} games in {selfplay_done - start:.0f}s")
+            training_data = [move for generation in replay_buffer for move in generation]
+            print(f"Training on {len(training_data)} positions from the last {len(replay_buffer)} generations")
+            # Enough batches that each position is sampled passes_per_generation
+            # times on average, however full the replay buffer is
+            batch_samples = math.ceil(passes_per_generation * len(training_data) / batch_size)
+            policy_total = value_total = 0.0
+            for _ in range(batch_samples):
+                batch = random.choices(training_data, k=batch_size)
+                policy_loss, value_loss = train(bot, optimizer, batch)
+                policy_total += policy_loss
+                value_total += value_loss
+            print(f"Avg loss over {batch_samples} batches: policy {policy_total / batch_samples:.4f}, value {value_total / batch_samples:.4f}")
+            train_done = time.time()
+            record = evaluate_vs_mct(pool, bot, eval_games, n_games_simulate, mct_iterations)
+            eval_done = time.time()
+            print(f"Generation took {eval_done - start:.0f}s")
+            torch.save({
+                'model_state_dict': bot.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict()
+            }, TRAINED_PATH)
+
+            selfplay_results = Counter(game_winner(game_moves) for game_moves in games)
+            log_generation({
+                'run': run, 'generation': i + 1,
+                'workers': pool.n_workers, 'n_games_simulate': n_games_simulate, 'mct_iterations': mct_iterations,
+                'selfplay_games': games_per_gen, 'selfplay_positions': len(replay_buffer[-1]),
+                'selfplay_x_wins': selfplay_results['X'], 'selfplay_o_wins': selfplay_results['O'],
+                'selfplay_draws': selfplay_results[DRAW],
+                'buffer_positions': len(training_data), 'batches': batch_samples,
+                'policy_loss': policy_total / batch_samples, 'value_loss': value_total / batch_samples,
+                'policy_target_entropy': policy_entropy(training_data),
+                'value_target_mse': sum(move.target ** 2 for move in training_data) / len(training_data),
+                **{f'eval_{side.lower()}_{outcome}': record[side][k]
+                   for side in ('X', 'O') for k, outcome in enumerate(('wins', 'draws', 'losses'))},
+                'selfplay_seconds': selfplay_done - start, 'train_seconds': train_done - selfplay_done,
+                'eval_seconds': eval_done - train_done,
+            })

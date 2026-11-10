@@ -1,6 +1,10 @@
+import multiprocessing
+import os
+import pickle
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 import torch
+from utt_smart.net import BOT
 
 
 class BatchedEvaluator:
@@ -68,3 +72,53 @@ def run_on_threads(bot, n_games, play):
         results = [game.result() for game in [executor.submit(run, i) for i in range(n_games)]]
     eval_thread.join()
     return results
+
+
+def init_worker():
+    # One core per worker, rather than every worker starting a torch thread
+    # pool the size of the whole machine
+    torch.set_num_threads(1)
+    # Spawned processes all start torch's generator from the same fixed seed,
+    # which would give every worker the same Dirichlet noise
+    torch.seed()
+
+
+def run_chunk(weights, play, game_indices):
+    # Runs in a worker: the chunk's games share this process's copy of the
+    # network, with their calls batched on threads as in run_on_threads
+    BOT.load_state_dict(pickle.loads(weights))
+    results = run_on_threads(BOT, len(game_indices), lambda nn_call, i: play(nn_call, game_indices[i]))
+    # Plain pickle copies tensors into the message. The pool's own pickler would
+    # put each tensor in its own shared memory file, and thousands of small
+    # ones run out of file descriptors
+    return pickle.dumps(results)
+
+
+class GamePool:
+    # Worker processes that play games in parallel, outside the GIL. Start it
+    # once per training run, since each worker has to import torch
+    def __init__(self, n_workers=None):
+        self.n_workers = n_workers or os.cpu_count()
+        # spawn rather than fork: forking after torch has started its thread pools can deadlock
+        self.pool = multiprocessing.get_context('spawn').Pool(
+            self.n_workers, initializer=init_worker)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.pool.terminate()
+        self.pool.join()
+
+    def run(self, bot, n_games, play):
+        # Like run_on_threads, but the games are split across the workers. play
+        # is sent to them, so it must be picklable: a module-level function or
+        # a functools.partial of one, not a lambda
+        weights = pickle.dumps(bot.state_dict())
+        chunks = [chunk for chunk in (list(range(w, n_games, self.n_workers)) for w in range(self.n_workers)) if chunk]
+        chunk_results = self.pool.starmap(run_chunk, [(weights, play, chunk) for chunk in chunks])
+        results = [None] * n_games
+        for chunk, pickled in zip(chunks, chunk_results):
+            for game_index, result in zip(chunk, pickle.loads(pickled)):
+                results[game_index] = result
+        return results

@@ -56,6 +56,9 @@ Commit `uv.lock` alongside any `pyproject.toml` changes.
 - `.devcontainer/devcontainer.json`: reproducible development workspace.
 - `pyproject.toml`: package metadata and optional `training` dependencies.
 - `uv.lock`: locked dependency versions used by `uv sync`.
+- `training_analysis.ipynb`: charts of the per-generation log that training
+  appends to `runs/training_log.csv` (win rate against MCT, losses, self-play
+  results, timings).
 
 This is the initial project scaffold; game logic, search, and training are not
 implemented yet. There is no test suite yet. Training checkpoints and run
