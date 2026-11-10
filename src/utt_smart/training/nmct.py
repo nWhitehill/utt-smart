@@ -1,8 +1,7 @@
 import math
 import random
 import torch
-from torch.nn import MSELoss
-from utt_smart.training.utt import UTT, DRAW
+from utt_smart.training.utt import UTT, DRAW, EMPTY, SUBGAME_CELLS
 from utt_smart.training.mct import other_token
 
 # How strongly the network's prior pulls the search towards a move, relative
@@ -10,8 +9,12 @@ from utt_smart.training.mct import other_token
 C_PUCT = 1.5
 
 # Self-play mixes Dirichlet noise into the root priors so the search sometimes
-# tries moves the network doesn't yet like, as in AlphaZero
-DIRICHLET_ALPHA = 0.3
+# tries moves the network doesn't yet like, as in AlphaZero. The number of legal
+# moves swings from 1 to 81, so alpha is scaled to it (KataGo does the same):
+# about DIRICHLET_TOTAL / moves, which keeps the noise from piling onto one or
+# two moves when there are many, or spreading flat when there are few
+DIRICHLET_TOTAL = 10.0
+DIRICHLET_MAX_ALPHA = 1.0
 NOISE_FRACTION = 0.25
 
 
@@ -35,16 +38,30 @@ class Node:
 
 
 def encode(game, to_move):
-    # The 3 input planes, from the point of view of the player about to move
-    # Built as Python lists and turned into a tensor in one call: every small
-    # torch op releases the GIL, which stalls self-play running on many threads
+    # The input planes (see net.IN_PLANES), from the point of view of the player
+    # about to move. Built as Python lists and turned into a tensor in one call:
+    # every small torch op releases the GIL, which stalls self-play running on
+    # many threads
     opponent = other_token(to_move)
-    mine = [1.0 if cell == to_move else 0.0 for cell in game.board]
-    theirs = [1.0 if cell == opponent else 0.0 for cell in game.board]
+    board = game.board
+    mine = [1.0 if cell == to_move else 0.0 for cell in board]
+    theirs = [1.0 if cell == opponent else 0.0 for cell in board]
     legal = [0.0] * 81
     for move in game.valid_moves():
         legal[move] = 1.0
-    return torch.tensor([mine, theirs, legal]).view(3, 9, 9)
+    # Who owns each subgame, spread over all 9 of its cells so it lines up with
+    # the pieces under the network's convolutions
+    won = [0.0] * 81
+    lost = [0.0] * 81
+    drawn = [0.0] * 81
+    for s, owner in enumerate(game.subgames):
+        if owner != EMPTY:
+            plane = won if owner == to_move else lost if owner == opponent else drawn
+            for i in SUBGAME_CELLS[s]:
+                plane[i] = 1.0
+    # X moves first and wins more often, so the value depends on which side is to move
+    is_x = [1.0 if to_move == 'X' else 0.0] * 81
+    return torch.tensor([mine, theirs, legal, won, lost, drawn, is_x]).view(7, 9, 9)
 
 
 def terminal_value(winner, token):
@@ -70,14 +87,30 @@ class NeuralMC:
         self.game = game.copy() if game is not None else UTT()
         # The root stands for the current position, reached by the other player's move
         self.root = Node(None, None, other_token(to_move), 1.0)
+        self.root_noised = False
 
     def evaluate(self, game, to_move):
         # Returns the network's move probabilities and its value for to_move
         return self.eval(encode(game, to_move))
 
     def start(self, iterations):
+        # A root kept from the previous move is already expanded, so it gets its
+        # noise here rather than when it is first expanded in simulate()
+        if self.noise and not self.root_noised and not self.root.is_leaf():
+            self.add_root_noise()
         for _ in range(iterations):
             self.simulate()
+
+    def advance(self, move):
+        # Plays move and keeps the subtree below it, so the next search starts
+        # with the visits this one already spent on that position
+        child = next((c for c in self.root.children or [] if c.move == move), None)
+        self.game.apply_move(move, other_token(self.root.token))
+        if child is None:
+            child = Node(None, move, other_token(self.root.token), 1.0)
+        child.parent = None
+        self.root = child
+        self.root_noised = False
 
     def simulate(self):
         node = self.root
@@ -110,9 +143,14 @@ class NeuralMC:
 
     def add_root_noise(self):
         children = self.root.children
-        noise = torch.distributions.Dirichlet(torch.full((len(children),), DIRICHLET_ALPHA)).sample()
+        alpha = min(DIRICHLET_MAX_ALPHA, DIRICHLET_TOTAL / len(children))
+        # random.gammavariate rather than torch's Dirichlet: one torch call per
+        # move is slow and releases the GIL (see encode)
+        noise = [random.gammavariate(alpha, 1.0) for _ in children]
+        total = sum(noise) or 1.0
         for child, n in zip(children, noise):
-            child.prior = (1 - NOISE_FRACTION) * child.prior + NOISE_FRACTION * n.item()
+            child.prior = (1 - NOISE_FRACTION) * child.prior + NOISE_FRACTION * n / total
+        self.root_noised = True
 
     def sample_move(self):
         # Picks a move with probability proportional to its visit count, so
@@ -124,10 +162,15 @@ class NeuralMC:
         best = max(self.root.children, key=lambda node: node.visits)
         return best.move
 
+    def root_value(self):
+        # The search's value for the player to move
+        return -self.root.q()
+
     def policy(self):
         # Visit counts as an 81-long probability distribution: the training
         # target for the network's policy head
-        pi = torch.zeros(81)
+        pi = [0.0] * 81
         for child in self.root.children:
             pi[child.move] = child.visits
-        return pi / pi.sum()
+        total = sum(pi)
+        return torch.tensor([p / total for p in pi])

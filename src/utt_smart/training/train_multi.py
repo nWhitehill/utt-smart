@@ -4,7 +4,7 @@ import pickle
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 import torch
-from utt_smart.net import BOT
+from utt_smart.net import Net
 
 
 class BatchedEvaluator:
@@ -83,11 +83,19 @@ def init_worker():
     torch.seed()
 
 
+# The worker's copy of the network, rebuilt only when the network's shape changes
+_worker_bot = None
+
+
 def run_chunk(weights, play, game_indices):
     # Runs in a worker: the chunk's games share this process's copy of the
     # network, with their calls batched on threads as in run_on_threads
-    BOT.load_state_dict(pickle.loads(weights))
-    results = run_on_threads(BOT, len(game_indices), lambda nn_call, i: play(nn_call, game_indices[i]))
+    global _worker_bot
+    config, state_dict = pickle.loads(weights)
+    if _worker_bot is None or _worker_bot.config != config:
+        _worker_bot = Net(**config)
+    _worker_bot.load_state_dict(state_dict)
+    results = run_on_threads(_worker_bot, len(game_indices), lambda nn_call, i: play(nn_call, game_indices[i]))
     # Plain pickle copies tensors into the message. The pool's own pickler would
     # put each tensor in its own shared memory file, and thousands of small
     # ones run out of file descriptors
@@ -114,7 +122,8 @@ class GamePool:
         # Like run_on_threads, but the games are split across the workers. play
         # is sent to them, so it must be picklable: a module-level function or
         # a functools.partial of one, not a lambda
-        weights = pickle.dumps(bot.state_dict())
+        # Workers run on the CPU, whatever device the network is training on
+        weights = pickle.dumps((bot.config, {k: v.cpu() for k, v in bot.state_dict().items()}))
         chunks = [chunk for chunk in (list(range(w, n_games, self.n_workers)) for w in range(self.n_workers)) if chunk]
         chunk_results = self.pool.starmap(run_chunk, [(weights, play, chunk) for chunk in chunks])
         results = [None] * n_games
