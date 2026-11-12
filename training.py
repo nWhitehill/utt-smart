@@ -1,6 +1,6 @@
 import argparse
 import os
-from utt_smart.training.train import training
+from utt_smart.nn.training.train import training
 
 
 def main() -> None:

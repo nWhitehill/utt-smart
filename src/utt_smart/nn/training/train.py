@@ -1,9 +1,10 @@
-from utt_smart.net import Net, TRAINED_PATH, load_checkpoint, new_optimizer, save_checkpoint
-from utt_smart.training.nmct import NeuralMC, encode
-from utt_smart.training.utt import UTT, DRAW
-from utt_smart.training.mct import MC, other_token
-from utt_smart.training.symmetry import random_symmetries
-from utt_smart.training.train_multi import GamePool
+from utt_smart.bots.mct import MC
+from utt_smart.bots.nmct import NeuralMC
+from utt_smart.nn.encoding import encode
+from utt_smart.nn.net import Net, TRAINED_PATH, load_checkpoint, new_optimizer, save_checkpoint
+from utt_smart.nn.training.symmetry import random_symmetries
+from utt_smart.nn.training.train_multi import GamePool
+from utt_smart.utt import UTT, DRAW, other_token
 import torch
 import torch.nn.functional as F
 from collections import Counter, deque

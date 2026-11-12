@@ -1,11 +1,11 @@
 import random
 import torch
-from utt_smart.net import IN_PLANES, Net
-from utt_smart.training.mct import other_token
-from utt_smart.training.nmct import NeuralMC, encode
-from utt_smart.training.symmetry import PERMUTATIONS, random_symmetries
-from utt_smart.training.train import losses, play_game_nmct
-from utt_smart.training.utt import UTT
+from utt_smart.bots.nmct import NeuralMC
+from utt_smart.nn.encoding import encode
+from utt_smart.nn.net import IN_PLANES, Net
+from utt_smart.nn.training.symmetry import PERMUTATIONS, random_symmetries
+from utt_smart.nn.training.train import losses, play_game_nmct
+from utt_smart.utt import UTT, other_token
 
 
 def random_position(rng, moves):

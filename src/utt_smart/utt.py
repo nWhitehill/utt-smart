@@ -25,6 +25,10 @@ LINES = [(0, 1, 2), (3, 4, 5), (6, 7, 8),
 LINES_THROUGH = [[line for line in LINES if pos in line] for pos in range(9)]
 
 
+def other_token(token):
+    return 'O' if token == 'X' else 'X'
+
+
 class UTT:
     def __init__(self):
         self.board = [EMPTY for _ in range(81)]

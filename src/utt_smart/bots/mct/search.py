@@ -1,6 +1,6 @@
 import math
 import random
-from utt_smart.training.utt import UTT, DRAW
+from utt_smart.utt import UTT, DRAW, other_token
 
 EXPLORATION = 1.41
 
@@ -17,9 +17,6 @@ class Node:
 
     def is_leaf(self):
         return self.children is None
-
-def other_token(token):
-    return 'O' if token == 'X' else 'X'
 
 def score(winner):
     if winner == DRAW:

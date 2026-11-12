@@ -3,9 +3,9 @@ import torch
 from torch import nn
 
 # Always the project root, whatever directory training is run from
-TRAINED_PATH = pathlib.Path(__file__).resolve().parents[2] / "trained.pt"
+TRAINED_PATH = pathlib.Path(__file__).resolve().parents[3] / "trained.pt"
 
-# Input planes, from the point of view of the player about to move (see nmct.encode):
+# Input planes, from the point of view of the player about to move (see encoding.encode):
 # my pieces, opponent's pieces, legal moves, subgames I've won, subgames they've
 # won, drawn subgames, and a constant plane that is 1 when the player to move is X
 IN_PLANES = 7

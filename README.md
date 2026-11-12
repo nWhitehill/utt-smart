@@ -74,7 +74,7 @@ Training is AlphaZero-style self-play. Each generation:
 3. **Evaluation**: 100 games against plain MCT with random playouts
    (1000 iterations a move), with the network on 200 simulations and no tree reuse.
 
-The network (`src/utt_smart/net.py`) is a 6-block, 64-channel residual CNN over
+The network (`src/utt_smart/nn/net.py`) is a 6-block, 64-channel residual CNN over
 the 9x9 grid. It takes 7 input planes from the side to move: its pieces, the
 opponent's pieces, the legal moves, subgames won by each side, drawn subgames,
 and whether it is playing X. It outputs a policy over the 81 cells and a value
@@ -87,14 +87,16 @@ loaded, so move it aside to start over.
 
 ## Project layout
 
-- `src/utt_smart/training/utt.py`: the game rules.
-- `src/utt_smart/training/mct.py`: plain MCT with random playouts, the
-  evaluation opponent.
-- `src/utt_smart/training/nmct.py`: network-guided search (PUCT) and the input
-  encoding.
-- `src/utt_smart/training/train.py`: the self-play training loop;
-  `train_multi.py` runs games on worker processes; `symmetry.py` holds the
-  board symmetries used for augmentation.
+- `src/utt_smart/utt.py`: the game rules, shared by the bots and training.
+- `src/utt_smart/bots/`: the bots, one package each.
+  - `mct/`: Monte Carlo tree search with random playouts (`MC`), also the
+    evaluation opponent.
+  - `nmct/`: tree search guided by the network (PUCT, `NeuralMC`).
+- `src/utt_smart/nn/`: the network (`net.py`) and its input planes
+  (`encoding.py`).
+  - `training/`: the self-play training loop (`train.py`); `train_multi.py`
+    runs games on worker processes; `symmetry.py` holds the board symmetries
+    used for augmentation.
 - `training.py`, `evaluate.py`: command-line entry points.
 - `tests/`: pytest checks for the symmetries, the search, and the self-play
   records.

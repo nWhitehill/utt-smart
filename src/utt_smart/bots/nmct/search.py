@@ -1,8 +1,8 @@
 import math
 import random
 import torch
-from utt_smart.training.utt import UTT, DRAW, EMPTY, SUBGAME_CELLS
-from utt_smart.training.mct import other_token
+from utt_smart.nn.encoding import encode
+from utt_smart.utt import UTT, DRAW, other_token
 
 # How strongly the network's prior pulls the search towards a move, relative
 # to the value the search has measured for it
@@ -35,33 +35,6 @@ class Node:
 
     def q(self):
         return self.value_sum / self.visits if self.visits else 0.0
-
-
-def encode(game, to_move):
-    # The input planes (see net.IN_PLANES), from the point of view of the player
-    # about to move. Built as Python lists and turned into a tensor in one call:
-    # every small torch op releases the GIL, which stalls self-play running on
-    # many threads
-    opponent = other_token(to_move)
-    board = game.board
-    mine = [1.0 if cell == to_move else 0.0 for cell in board]
-    theirs = [1.0 if cell == opponent else 0.0 for cell in board]
-    legal = [0.0] * 81
-    for move in game.valid_moves():
-        legal[move] = 1.0
-    # Who owns each subgame, spread over all 9 of its cells so it lines up with
-    # the pieces under the network's convolutions
-    won = [0.0] * 81
-    lost = [0.0] * 81
-    drawn = [0.0] * 81
-    for s, owner in enumerate(game.subgames):
-        if owner != EMPTY:
-            plane = won if owner == to_move else lost if owner == opponent else drawn
-            for i in SUBGAME_CELLS[s]:
-                plane[i] = 1.0
-    # X moves first and wins more often, so the value depends on which side is to move
-    is_x = [1.0 if to_move == 'X' else 0.0] * 81
-    return torch.tensor([mine, theirs, legal, won, lost, drawn, is_x]).view(7, 9, 9)
 
 
 def terminal_value(winner, token):
