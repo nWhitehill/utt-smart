@@ -8,12 +8,17 @@ version = "0.1.0"
 description = "Neural-network and Monte Carlo search experiments for Ultimate Tic Tac Toe"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "torch>=2.14.1",
+]
 
 [project.optional-dependencies]
 training = [
+    "ipykernel>=7.4.0",
+    "matplotlib>=3.11.2",
     "numpy>=2.5.4",
-    "torch>=2.14.1",
+    "pandas>=3.1.0",
+    "pytest>=9.2.0",
 ]
 
 [tool.setuptools.packages.find]
