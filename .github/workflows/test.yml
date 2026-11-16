@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      # Only the dev group (ruff), so this job doesn't install torch.
+      - run: uv run --frozen --only-dev ruff check --output-format github .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      # The lock pins PyPI's torch, which on Linux pulls in several GB of CUDA
+      # libraries. As in package.sh, use the lock as constraints and install the
+      # CPU-only build of the same version instead.
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv export --frozen --extra training --no-emit-project --no-hashes \
+            --format requirements.txt > "$RUNNER_TEMP/constraints.txt"
+          uv pip install \
+            --index https://download.pytorch.org/whl/cpu \
+            --default-index https://pypi.org/simple \
+            --index-strategy unsafe-best-match \
+            -c "$RUNNER_TEMP/constraints.txt" \
+            -e . pytest
+      - run: .venv/bin/python -m pytest

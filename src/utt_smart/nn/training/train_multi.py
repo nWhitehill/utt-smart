@@ -4,7 +4,9 @@ import pickle
 import signal
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+
 import torch
+
 from utt_smart.nn.net import Net
 
 

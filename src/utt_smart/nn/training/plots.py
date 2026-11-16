@@ -2,17 +2,18 @@
 
 Needs the `training` extras (matplotlib, pandas, numpy) and IPython for the live dashboard.
 """
-from collections import deque
 import math
 import time
+from collections import deque
+
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Rectangle
-from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Rectangle
+from matplotlib.ticker import MaxNLocator
 
 # Win-rate lines pool this many generations, since one generation's 100
 # evaluation games still swing ~10 points either way

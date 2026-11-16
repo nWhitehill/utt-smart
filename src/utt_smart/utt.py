@@ -1,4 +1,5 @@
 import random
+
 # The 81 cells are stored row-major over the full 9x9 grid: index = row * 9 + col.
 # Subgames are numbered 0-8 left-to-right, top-to-bottom, and so are the cells
 # within a subgame.

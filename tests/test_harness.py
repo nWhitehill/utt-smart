@@ -3,8 +3,9 @@ import random
 import subprocess
 import sys
 import time
-from utt_smart.utt import CELL_SUBGAME, EMPTY, UTT, other_token
+
 from utt_smart.bots.harness import FROM_SERVER, TO_SERVER, Harness, parse_position
+from utt_smart.utt import CELL_SUBGAME, EMPTY, UTT, other_token
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BOTS = ROOT / "src" / "utt_smart" / "bots"

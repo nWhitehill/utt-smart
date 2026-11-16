@@ -1,22 +1,31 @@
-from utt_smart.bots.mct import MC
-from utt_smart.bots.nmct import NeuralMC
-from utt_smart.nn.encoding import encode
-from utt_smart.nn.net import Net, TRAINED_PATH, load_checkpoint, load_net, new_optimizer, save_checkpoint
-from utt_smart.nn.training.probes import evaluate_probes, probe_positions
-from utt_smart.nn.training.symmetry import random_symmetries
-from utt_smart.nn.training.train_multi import GamePool
-from utt_smart.utt import UTT, DRAW, other_token
-import torch
-import torch.nn.functional as F
-from collections import Counter, deque
 import csv
-from dataclasses import asdict, dataclass
-from functools import partial
 import json
 import math
 import pathlib
 import random
 import time
+from collections import Counter, deque
+from dataclasses import asdict, dataclass
+from functools import partial
+
+import torch
+import torch.nn.functional as F
+
+from utt_smart.bots.mct import MC
+from utt_smart.bots.nmct import NeuralMC
+from utt_smart.nn.encoding import encode
+from utt_smart.nn.net import (
+    TRAINED_PATH,
+    Net,
+    load_checkpoint,
+    load_net,
+    new_optimizer,
+    save_checkpoint,
+)
+from utt_smart.nn.training.probes import evaluate_probes, probe_positions
+from utt_smart.nn.training.symmetry import random_symmetries
+from utt_smart.nn.training.train_multi import GamePool
+from utt_smart.utt import DRAW, UTT, other_token
 
 # Self-play samples moves from the visit counts for this many moves, then plays
 # the most visited move for the rest of the game

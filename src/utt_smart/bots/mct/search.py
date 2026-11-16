@@ -1,6 +1,7 @@
 import math
 import random
-from utt_smart.utt import UTT, DRAW, other_token
+
+from utt_smart.utt import DRAW, UTT, other_token
 
 EXPLORATION = 1.41
 
@@ -51,7 +52,7 @@ class MC:
 
     def traverse(self, node, curr_game):
         if (node.is_leaf()):
-            if (curr_game.winner == None):
+            if (curr_game.winner is None):
                 child_token = other_token(node.token)
                 node.children = [Node(node, move, child_token) for move in curr_game.valid_moves()]
                 selected_child = random.choice(node.children)

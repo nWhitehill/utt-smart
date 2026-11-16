@@ -1,4 +1,5 @@
 import torch
+
 from utt_smart.utt import EMPTY, SUBGAME_CELLS, other_token
 
 
