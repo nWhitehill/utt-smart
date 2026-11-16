@@ -36,6 +36,31 @@ class UTT:
         self.moves = []
         self.winner = None  # 'X'/'O' token, DRAW, or None while in progress
 
+    @classmethod
+    def from_board(cls, board, last_move):
+        # A game in progress from its 81 cells ('X', 'O' or EMPTY) and the last
+        # move played (None before the first move). The move history isn't
+        # needed: the subgame owners follow from the board, and the last move
+        # alone decides where the next move may go
+        game = cls()
+        game.board = list(board)
+        game.moves = [] if last_move is None else [last_move]
+        for s, cells in enumerate(SUBGAME_CELLS):
+            for a, b, c in LINES:
+                if board[cells[a]] != EMPTY and board[cells[a]] == board[cells[b]] == board[cells[c]]:
+                    game.subgames[s] = board[cells[a]]
+                    break
+            else:
+                if all(board[i] != EMPTY for i in cells):
+                    game.subgames[s] = DRAW
+        for a, b, c in LINES:
+            if game.subgames[a] in ('X', 'O') and game.subgames[a] == game.subgames[b] == game.subgames[c]:
+                game.winner = game.subgames[a]
+                return game
+        if EMPTY not in game.subgames:
+            game.winner = DRAW
+        return game
+
     def copy(self):
         game = UTT.__new__(UTT)
         game.board = self.board.copy()

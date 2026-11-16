@@ -110,29 +110,76 @@ charts, how the probes changed over training, and single self-play positions
 with the network's prior next to the search's policy target. The replay buffer
 is only kept in memory, so after a kernel restart it starts empty.
 
-## Packaging the bot
+## Playing on Bots Playing Games
 
-`package.sh` builds a self-contained tarball for the Bots Playing Games runner:
-the `utt_smart` package and its runtime dependencies (a CPU-only PyTorch build,
-at the versions in `uv.lock`) installed into `lib/`. Extract it anywhere and
-run it with the matching `python3`. Nothing else needs to be installed.
+Each bot's `bot.py` is its entrypoint on [Bots Playing Games](https://github.com/bots-playing-games):
+pick the bot by giving the runner that file. Its bot class inherits from `Harness`
+(`src/utt_smart/bots/harness.py`), which speaks the platform's stdin/stdout
+protocol: it prints `ready`, then answers each `move` line with a cell index, and
+exits on `end ...`. It converts between the server's board-by-board cell numbering
+and `UTT`'s row-by-row numbering, checks every move against the server's legal
+boards, and falls back to a random legal move if the bot fails, because three
+rejected moves forfeit the game. Each move is searched for half the clock, 5 s of
+the platform's 10 s. The runner passes no extra arguments, so a bot's settings
+live in its `bot.py`.
+
+To try a bot locally (`--think` sets the seconds per move, for testing only):
+
+```sh
+uv run python src/utt_smart/bots/nmct/bot.py ULTIMATE_TIC_TAC_TOE X 10s
+uv run python src/utt_smart/bots/mct/bot.py ULTIMATE_TIC_TAC_TOE X 10s --think 1
+```
+
+then type a position, such as `move ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, ? 0,1,2,3,4,5,6,7,8`.
+
+| Bot | Entrypoint (in the tarball) | What it is | Needs |
+|---|---|---|---|
+| `nmct` | `lib/utt_smart/bots/nmct/bot.py` | tree search guided by the trained network | torch, and the network in `models/nmct.pt` |
+| `mct` | `lib/utt_smart/bots/mct/bot.py` | Monte Carlo tree search with random playouts | standard library only |
+
+`models/nmct.pt` is the network the bot plays with, committed to Git (the
+`.gitignore` ignores every other `.pt` file). To play a newer network, copy a
+snapshot over it, such as `runs/from-scratch/checkpoints/gen0150.pt`. The
+checkpoint records its generation (`torch.load(...)["generation"]`).
+
+To add a bot, make a package under `src/utt_smart/bots/` with a `bot.py` whose
+class inherits from `Harness` and implements `choose_move`, as described in
+`src/utt_smart/bots/__init__.py`. Copy the `sys.path` lines at the top of an
+existing `bot.py` (they let the file run as a script) and end it with
+`if __name__ == "__main__": YourBot.main()`. The tarball picks it up with no
+other changes.
+
+### Packaging the bot
+
+`package.sh` builds the bot artifact, a self-contained tarball that holds every
+bot:
+
+```
+models/nmct.pt   the network
+lib/             utt_smart and its runtime dependencies (a CPU-only PyTorch build,
+                 at the versions in uv.lock), including each bot's bot.py
+```
+
+Extract it anywhere and run a bot with the matching Python, for example
+`python3 lib/utt_smart/bots/nmct/bot.py ULTIMATE_TIC_TAC_TOE X 10s`. Nothing else
+needs to be installed: `bot.py` puts `lib/` on `sys.path` itself.
 
 ```sh
 ./package.sh                                   # dist/utt-smart-bot.tar.gz
-./package.sh --model checkpoints/gen0100.pt    # also adds the network as trained.pt
+./package.sh --model runs/from-scratch/checkpoints/gen0150.pt   # a different network
 ./package.sh --python 3.12 -o dist/local.tar.gz
 ```
 
 The defaults match the runner's Python image: Python 3.14 on linux/amd64
 (`--platform x86_64-manylinux_2_28`). Compiled wheels are tied to one Python
 minor version, so the tarball runs only on the version it was built for. The
-entrypoint has to put `lib/` on `sys.path` before importing anything from it.
-The tarball is about 190 MB, and 780 MB extracted, almost all of it PyTorch.
+tarball is about 190 MB, and 780 MB extracted, almost all of it PyTorch.
 
 ## Project layout
 
 - `src/utt_smart/utt.py`: the game rules, shared by the bots and training.
-- `src/utt_smart/bots/`: the bots, one package each.
+- `src/utt_smart/bots/`: the bots, one package each, with a `bot.py` that is
+  the bot's entrypoint; `harness.py` holds the platform protocol they inherit.
   - `mct/`: Monte Carlo tree search with random playouts (`MC`), also the
     evaluation opponent.
   - `nmct/`: tree search guided by the network (PUCT, `NeuralMC`).
@@ -145,8 +192,9 @@ The tarball is about 190 MB, and 780 MB extracted, almost all of it PyTorch.
     notebook's charts and board drawings.
 - `evaluate.py`: plays a network against MCT from the command line.
 - `package.sh`: builds the bot tarball (see *Packaging the bot*).
-- `tests/`: pytest checks for the symmetries, the search, the self-play
-  records, the two-network evaluator and the ladder.
+- `models/nmct.pt`: the trained network `nmct` plays with.
+- `tests/`: pytest checks for the harness and protocol, the symmetries, the
+  search, the self-play records, the two-network evaluator and the ladder.
 - `.devcontainer/devcontainer.json`: reproducible development workspace.
 - `pyproject.toml`: package metadata and optional `training` dependencies.
 - `uv.lock`: locked dependency versions used by `uv sync`.

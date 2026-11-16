@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Builds a self-contained bot tarball: the utt_smart package and its runtime
-# dependencies (torch and what it needs), installed into lib/ for one Python
-# version and platform. Extract it anywhere and run it with that python3; nothing
-# else needs installing. The entrypoint has to put lib/ on sys.path first.
+# Builds the self-contained bot tarball for Bots Playing Games: the network,
+# and the utt_smart package with its runtime dependencies (torch and what it
+# needs) installed into lib/ for one Python version and platform. Each bot's
+# bot.py is an entrypoint: extract the tarball anywhere and run, say,
+# `python3 lib/utt_smart/bots/nmct/bot.py ULTIMATE_TIC_TAC_TOE X 10s` with that
+# Python; nothing else needs installing. bot.py puts lib/ on sys.path itself.
 #
 #   ./package.sh                         # dist/utt-smart-bot.tar.gz for the runner image
-#   ./package.sh --model models/gen0100.pt
+#   ./package.sh --model runs/from-scratch/checkpoints/gen0150.pt
 #   ./package.sh --python 3.12 --platform x86_64-manylinux_2_28 -o dist/local.tar.gz
 #
 # Layout inside the tarball:
-#   lib/          utt_smart, torch (CPU-only build) and the other runtime deps
-#   trained.pt    the network, if --model was given
+#   models/nmct.pt                 the network nmct plays with (--model, default models/nmct.pt)
+#   lib/                           utt_smart, torch (CPU-only build) and the other runtime deps
+#   lib/utt_smart/bots/nmct/bot.py entrypoint for nmct
+#   lib/utt_smart/bots/mct/bot.py  entrypoint for mct (standard library only)
 #
 # The defaults match sandbox-runner's python3_14 image (python:3.14-slim, linux/amd64).
 # Wheels are compiled per Python minor version, so the tarball only runs on the
@@ -24,10 +28,10 @@ platform=x86_64-manylinux_2_28
 # CPU-only torch. The default PyPI torch wheel for Linux depends on several GB of
 # CUDA libraries, and the bot runs on CPU.
 torch_index=https://download.pytorch.org/whl/cpu
-model=
+model=models/nmct.pt
 output=dist/utt-smart-bot.tar.gz
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,7 +45,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "$model" && ! -f "$model" ]]; then
+if [[ ! -f "$model" ]]; then
     echo "model not found: $model" >&2
     exit 1
 fi
@@ -80,9 +84,8 @@ uv pip install \
 find "$stage/bundle/lib" -name __pycache__ -type d -prune -exec rm -rf {} +
 rm -rf "$stage/bundle/lib/bin"
 
-if [[ -n "$model" ]]; then
-    cp "$model" "$stage/bundle/trained.pt"
-fi
+mkdir -p "$stage/bundle/models"
+cp "$model" "$stage/bundle/models/nmct.pt"
 
 mkdir -p "$(dirname "$output")"
 tar -czf "$output" -C "$stage/bundle" .
