@@ -93,3 +93,48 @@ def test_self_play_game_and_losses():
     assert set(record.values.tolist()) <= {-1.0, 0.0, 1.0}
     policy_loss, value_loss = losses(bot.train(), record.states, record.policies, record.has_policy, record.values)
     assert torch.isfinite(policy_loss) and torch.isfinite(value_loss)
+
+
+def test_threads_route_each_network_its_own_calls():
+    # Two networks in one batched evaluator: every call must come back from the
+    # network it was sent to, even when games wait on different networks
+    from utt_smart.nn.training.train_multi import run_on_threads
+    nets = [Net(blocks=1, ch=8).eval(), Net(blocks=1, ch=8).eval()]
+    position = encode(UTT(), 'X')
+    with torch.no_grad():
+        expected = [net(position.unsqueeze(0))[1].item() for net in nets]
+
+    def play(nn_calls, game_index):
+        # Games ask the networks in different orders
+        order = (0, 1, 1, 0) if game_index % 2 else (1, 0, 0, 1)
+        return [(model, nn_calls[model](position)[1]) for model in order]
+
+    for calls in run_on_threads(nets, 6, play):
+        for model, value in calls:
+            assert abs(value - expected[model]) < 1e-5
+
+
+def test_net_vs_net_pairs_share_openings():
+    # Games 2k and 2k + 1 start from the same random opening; the first position
+    # either network is asked about is the one right after it
+    from utt_smart.nn.training.train import play_net_vs_net
+    first_seen = []
+
+    def uniform(encoded):
+        if len(first_seen) == game:
+            first_seen.append(encoded[:2].sum(0))  # the occupied cells
+        return [1 / 81] * 81, 0.0
+
+    for game in range(4):
+        assert play_net_vs_net([uniform, uniform], game, sims=4) in ('X', 'O', 'd')
+    assert torch.equal(first_seen[0], first_seen[1]) and torch.equal(first_seen[2], first_seen[3])
+    assert not torch.equal(first_seen[0], first_seen[2])
+
+
+def test_elo_difference():
+    import math
+    from utt_smart.nn.training.train import elo_difference
+    assert elo_difference(0.5, 40) == 0
+    assert 185 < elo_difference(0.75, 40) < 195
+    # A clean sweep is kept finite
+    assert math.isclose(elo_difference(1.0, 40), -elo_difference(0.0, 40)) and elo_difference(1.0, 40) < 1000

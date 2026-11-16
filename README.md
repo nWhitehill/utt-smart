@@ -51,9 +51,10 @@ Commit `uv.lock` alongside any `pyproject.toml` changes.
 
 ## Training
 
+Training runs from `training_analysis.ipynb` (see *Training from the notebook*).
+From the command line:
+
 ```sh
-uv run python training.py                    # 100 generations; resumes from trained.pt if it exists
-uv run python training.py --generations 20 --lr 3e-4 --cores 16
 uv run python evaluate.py checkpoints/gen0100.pt --games 200 --sims 50 200 --mct 1000 5000
 uv run pytest
 ```
@@ -73,6 +74,14 @@ Training is AlphaZero-style self-play. Each generation:
    AdamW with weight decay.
 3. **Evaluation**: 100 games against plain MCT with random playouts
    (1000 iterations a move), with the network on 200 simulations and no tree reuse.
+4. **Ladder** (every snapshot, so every 10 generations by default): 40 games
+   against the previous snapshot, both on 100 simulations, from 2-move random
+   openings shared by each pair of games with the colours swapped. The result
+   gives an Elo rating, chained back to the untrained network at 0. Unlike the
+   MCT win rate, which tops out once the network beats MCT nearly every game,
+   it keeps rising as long as the network improves.
+5. **Probes**: the network's policy and value on a few fixed positions
+   (`training/probes.py`), saved to `probes.jsonl`.
 
 The network (`src/utt_smart/nn/net.py`) is a 6-block, 64-channel residual CNN over
 the 9x9 grid. It takes 7 input planes from the side to move: its pieces, the
@@ -81,9 +90,44 @@ and whether it is playing X. It outputs a policy over the 81 cells and a value
 in [-1, 1].
 
 Training saves `trained.pt` every generation, keeps a copy in
-`checkpoints/genNNNN.pt` every 10 generations, and appends a row per generation
-to `runs/training_log.csv`. A checkpoint from before the 7-plane input can't be
-loaded, so move it aside to start over.
+`checkpoints/genNNNN.pt` every 10 generations (including `gen0000.pt`, the
+untrained network, for a new run), and appends a row per generation to
+`runs/training_log.csv`. Given a run directory (the notebook uses one), all of
+these go in that directory instead. When the log's columns change, the old log is renamed and a new one
+started. A checkpoint from before the 7-plane input can't be loaded, so move
+it aside to start over.
+
+### Training from the notebook
+
+`training_analysis.ipynb` runs the loop through `Trainer`
+(`training/train.py`) one generation at a time, in its own run directory
+(`runs/from-scratch` by default). A dashboard is redrawn after every generation:
+the win rate against MCT, the Elo ladder, both losses against their floors, and
+the network's policy on the probe positions. Interrupting the cell stops cleanly
+after shutting down the workers; running it again carries on, and changes to
+`trainer.config` apply from the next generation. Later sections show the full
+charts, how the probes changed over training, and single self-play positions
+with the network's prior next to the search's policy target. The replay buffer
+is only kept in memory, so after a kernel restart it starts empty.
+
+## Packaging the bot
+
+`package.sh` builds a self-contained tarball for the Bots Playing Games runner:
+the `utt_smart` package and its runtime dependencies (a CPU-only PyTorch build,
+at the versions in `uv.lock`) installed into `lib/`. Extract it anywhere and
+run it with the matching `python3`. Nothing else needs to be installed.
+
+```sh
+./package.sh                                   # dist/utt-smart-bot.tar.gz
+./package.sh --model checkpoints/gen0100.pt    # also adds the network as trained.pt
+./package.sh --python 3.12 -o dist/local.tar.gz
+```
+
+The defaults match the runner's Python image: Python 3.14 on linux/amd64
+(`--platform x86_64-manylinux_2_28`). Compiled wheels are tied to one Python
+minor version, so the tarball runs only on the version it was built for. The
+entrypoint has to put `lib/` on `sys.path` before importing anything from it.
+The tarball is about 190 MB, and 780 MB extracted, almost all of it PyTorch.
 
 ## Project layout
 
@@ -94,17 +138,19 @@ loaded, so move it aside to start over.
   - `nmct/`: tree search guided by the network (PUCT, `NeuralMC`).
 - `src/utt_smart/nn/`: the network (`net.py`) and its input planes
   (`encoding.py`).
-  - `training/`: the self-play training loop (`train.py`); `train_multi.py`
-    runs games on worker processes; `symmetry.py` holds the board symmetries
-    used for augmentation.
-- `training.py`, `evaluate.py`: command-line entry points.
-- `tests/`: pytest checks for the symmetries, the search, and the self-play
-  records.
+  - `training/`: the self-play training loop (`train.py`, with `Trainer` and
+    `TrainingConfig`); `train_multi.py` runs games on worker processes, with
+    one or two networks; `symmetry.py` holds the board symmetries used for
+    augmentation; `probes.py` the fixed probe positions; `plots.py` the
+    notebook's charts and board drawings.
+- `evaluate.py`: plays a network against MCT from the command line.
+- `package.sh`: builds the bot tarball (see *Packaging the bot*).
+- `tests/`: pytest checks for the symmetries, the search, the self-play
+  records, the two-network evaluator and the ladder.
 - `.devcontainer/devcontainer.json`: reproducible development workspace.
 - `pyproject.toml`: package metadata and optional `training` dependencies.
 - `uv.lock`: locked dependency versions used by `uv sync`.
-- `training_analysis.ipynb`: charts of the per-generation log that training
-  appends to `runs/training_log.csv` (win rate against MCT, losses, self-play
-  results, timings).
+- `training_analysis.ipynb`: runs training with a live dashboard, and charts
+  the run's log, probes and self-play games (see *Training from the notebook*).
 
 Training checkpoints and run outputs are ignored by Git.
