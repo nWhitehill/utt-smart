@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
+
 from utt_smart.nn.encoding import encode
 from utt_smart.utt import UTT
-
 
 # A few fixed positions the network is asked about after every generation, so
 # you can watch what it believes change as it trains: where it wants to play,

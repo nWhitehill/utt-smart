@@ -1,8 +1,10 @@
 import math
 import random
+
 import torch
+
 from utt_smart.nn.encoding import encode
-from utt_smart.utt import UTT, DRAW, other_token
+from utt_smart.utt import DRAW, UTT, other_token
 
 # How strongly the network's prior pulls the search towards a move, relative
 # to the value the search has measured for it

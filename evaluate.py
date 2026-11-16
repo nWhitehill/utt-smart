@@ -1,5 +1,6 @@
 import argparse
 import os
+
 from utt_smart.nn.net import TRAINED_PATH, load_net
 from utt_smart.nn.training.train import evaluate_vs_mct
 from utt_smart.nn.training.train_multi import GamePool

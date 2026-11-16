@@ -49,6 +49,16 @@ For a lightweight package-only installation, run `uv sync` without
 
 Commit `uv.lock` alongside any `pyproject.toml` changes.
 
+### Tests and lint
+
+```sh
+uv run pytest
+uv run ruff check .        # --fix to apply the safe fixes
+```
+
+The **Test** GitHub workflow runs both on every pull request and push to `main`.
+Ruff's rules are in `pyproject.toml`. It lints notebooks too.
+
 ## Training
 
 Training runs from `training_analysis.ipynb` (see *Training from the notebook*).

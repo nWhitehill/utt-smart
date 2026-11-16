@@ -13,6 +13,7 @@ if __name__ == "__main__":
     sys.path[0] = str(pathlib.Path(__file__).resolve().parents[3])
 
 import torch  # noqa: E402
+
 from utt_smart.bots import search_until  # noqa: E402
 from utt_smart.bots.harness import Harness  # noqa: E402
 from utt_smart.bots.nmct.search import NeuralMC  # noqa: E402

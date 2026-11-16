@@ -1,5 +1,7 @@
 import random
+
 import torch
+
 from utt_smart.bots.nmct import NeuralMC
 from utt_smart.nn.encoding import encode
 from utt_smart.nn.net import IN_PLANES, Net
@@ -58,7 +60,9 @@ def test_search_takes_a_winning_move():
     game.board[32] = 'O'
     game.moves = [32]
     assert 8 in game.valid_moves() and all(m in (8, 15, 16, 17, 24, 25, 26) for m in game.valid_moves())
-    uniform = lambda encoded: ([1 / 81] * 81, 0.0)
+    def uniform(encoded):
+        return [1 / 81] * 81, 0.0
+
     search = NeuralMC(uniform, game, 'X')
     search.start(300)
     assert search.best_move() == 8
@@ -66,7 +70,10 @@ def test_search_takes_a_winning_move():
 
 def test_tree_reuse_keeps_the_subtree():
     rng = random.Random(1)
-    uniform = lambda encoded: ([1 / 81] * 81, rng.uniform(-1, 1))
+
+    def uniform(encoded):
+        return [1 / 81] * 81, rng.uniform(-1, 1)
+
     search = NeuralMC(uniform, UTT(), 'X')
     search.start(200)
     move = search.best_move()
@@ -133,6 +140,7 @@ def test_net_vs_net_pairs_share_openings():
 
 def test_elo_difference():
     import math
+
     from utt_smart.nn.training.train import elo_difference
     assert elo_difference(0.5, 40) == 0
     assert 185 < elo_difference(0.75, 40) < 195
