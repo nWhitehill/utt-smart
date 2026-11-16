@@ -57,7 +57,7 @@ uv run ruff check .        # --fix to apply the safe fixes
 ```
 
 The **Test** GitHub workflow runs both on every pull request and push to `main`.
-Ruff's rules are in `pyproject.toml`; notebooks are not linted.
+Ruff's rules are in `pyproject.toml`. It lints notebooks too.
 
 ## Training
 

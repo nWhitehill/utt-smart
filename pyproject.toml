@@ -32,8 +32,6 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# Notebooks are scratch work, rewritten by the editor as they run; lint the package instead.
-extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
